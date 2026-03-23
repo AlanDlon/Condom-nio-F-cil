@@ -165,10 +165,10 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
     }).catch(err => handleFirestoreError(err, OperationType.GET, settingsPath));
 
     const unsubscribeUsers = onSnapshot(query(collection(db, 'users'), where('role', '==', 'resident')), (userSnapshot) => {
-      const usersData = userSnapshot.docs.map(doc => doc.data());
+      const usersData = userSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any));
       
       const unsubscribeInvoices = onSnapshot(collection(db, 'invoices'), (invoiceSnapshot) => {
-        const invoicesData = invoiceSnapshot.docs.map(doc => ({ ...doc.data(), docId: doc.id } as Invoice));
+        const invoicesData = invoiceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), docId: doc.id } as Invoice));
         setAllInvoices(invoicesData);
         
         const processedResidents: ResidentRecord[] = usersData.map(user => {
@@ -229,7 +229,7 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
     });
 
     const unsubscribeExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
-      const expensesData = snapshot.docs.map(doc => ({ ...doc.data(), docId: doc.id } as Expense));
+      const expensesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), docId: doc.id } as Expense));
       setExpenses(expensesData);
     }, (err) => {
       if (auth.currentUser) {
