@@ -6,7 +6,8 @@ import cors from "cors";
 import admin from "firebase-admin";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
-import { addHours, subHours, startOfDay, endOfDay } from "date-fns";
+import { addHours, subHours, startOfDay, endOfDay, format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,6 +69,67 @@ cron.schedule("0 8 * * *", async () => {
   }
 });
 
+// Cron job to generate recurring invoices
+// Runs every day at 01:00
+cron.schedule("0 1 * * *", async () => {
+  console.log("Running recurring billing cron job...");
+  const today = new Date();
+  const currentDay = today.getDate();
+  const currentMonth = today.getMonth(); // 0-11
+  const currentYear = today.getFullYear();
+
+  try {
+    const settingsDoc = await db.collection("settings").doc("general").get();
+    if (!settingsDoc.exists) return;
+
+    const settings = settingsDoc.data();
+    const recurringDay = settings?.recurringDay;
+    const monthlyAmount = settings?.monthlyContribution || 250;
+
+    if (currentDay === recurringDay) {
+      console.log(`Today is the recurring day (${recurringDay}). Generating invoices...`);
+      
+      const residentsSnapshot = await db.collection("users")
+        .where("role", "==", "resident")
+        .get();
+
+      const monthName = format(today, "MMMM", { locale: ptBR });
+      const description = `Mensalidade - ${monthName}/${currentYear}`;
+      const dueDate = today.toISOString(); // Due today or maybe +5 days? User said "vencimento pré-estabelecido"
+      
+      for (const residentDoc of residentsSnapshot.docs) {
+        const userId = residentDoc.id;
+        
+        // Check if invoice already exists for this user and month
+        const existingInvoices = await db.collection("invoices")
+          .where("userId", "==", userId)
+          .where("description", "==", description)
+          .get();
+
+        if (existingInvoices.empty) {
+          const invoiceId = Math.random().toString(36).substr(2, 9);
+          // Generate simulated Pix
+          const pixCode = `00020101021226850014br.gov.bcb.pix0136${invoiceId}-condo-premium-5204000053039865405${monthlyAmount.toFixed(2)}5802BR5920CondoPremium6009SaoPaulo62070503***6304D1E2`;
+
+          await db.collection("invoices").add({
+            id: invoiceId,
+            userId: userId,
+            amount: monthlyAmount,
+            dueDate: dueDate,
+            status: "pending",
+            description: description,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            pixCode: pixCode
+          });
+          console.log(`Generated recurring invoice for user ${userId}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error in recurring billing cron job:", error);
+  }
+});
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -105,16 +167,22 @@ async function startServer() {
   // API: Simulação de Pagamento Pix
   app.post("/api/generate-pix", (req, res) => {
     const { invoiceId, amount } = req.body;
+    const numAmount = Number(amount);
+    if (isNaN(numAmount)) return res.status(400).json({ error: "Invalid amount" });
+    
     // Simulação de payload Pix Copia e Cola
-    const pixCode = `00020101021226850014br.gov.bcb.pix0136${invoiceId}-condo-premium-5204000053039865405${amount.toFixed(2)}5802BR5920CondoPremium6009SaoPaulo62070503***6304D1E2`;
+    const pixCode = `00020101021226850014br.gov.bcb.pix0136${invoiceId}-condo-premium-5204000053039865405${numAmount.toFixed(2)}5802BR5920CondoPremium6009SaoPaulo62070503***6304D1E2`;
     res.json({ pixCode });
   });
 
   // API: Simulação de Boleto Bancário
   app.post("/api/generate-boleto", (req, res) => {
     const { invoiceId, amount } = req.body;
+    const numAmount = Number(amount);
+    if (isNaN(numAmount)) return res.status(400).json({ error: "Invalid amount" });
+
     // Simulação de linha digitável de boleto
-    const boletoCode = `23793.38128 60087.003485 11000.000204 7 964300000${Math.round(amount * 100)}`;
+    const boletoCode = `23793.38128 60087.003485 11000.000204 7 964300000${Math.round(numAmount * 100)}`;
     res.json({ boletoCode });
   });
 
@@ -170,6 +238,40 @@ async function startServer() {
       res.json({ success: true, message: "Link de verificação gerado (simulado)." });
     } catch (error: any) {
       console.error("Error generating verification link:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: Send Notification Email
+  app.post("/api/send-notification-email", async (req, res) => {
+    const { userId, subject, message } = req.body;
+    if (!userId || !subject || !message) {
+      return res.status(400).json({ error: "Missing userId, subject, or message" });
+    }
+
+    try {
+      const userDoc = await db.collection("users").doc(userId).get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userData = userDoc.data();
+      const userEmail = userData?.email;
+
+      if (!userEmail) {
+        return res.status(400).json({ error: "User has no email registered" });
+      }
+
+      // In a real app, you'd use an email service like SendGrid, Mailgun, or AWS SES
+      // For this demo, we simulate the sending by logging to console
+      console.log(`--- SIMULATED EMAIL SENT ---`);
+      console.log(`To: ${userEmail}`);
+      console.log(`Subject: ${subject}`);
+      console.log(`Message: ${message}`);
+      console.log(`----------------------------`);
+
+      res.json({ success: true, message: "E-mail de notificação enviado (simulado)." });
+    } catch (error: any) {
+      console.error("Error sending notification email:", error);
       res.status(500).json({ error: error.message });
     }
   });

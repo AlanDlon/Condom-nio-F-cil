@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LogIn, ShieldCheck, Mail, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { signInWithEmailAndPassword, sendEmailVerification, GoogleAuthProvider, signInWithPopup, OAuthProvider, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
@@ -218,7 +219,7 @@ export default function Login({ onLogin, onGoToRegister }: LoginProps) {
           <span>
             O login com Google ainda não foi habilitado no Console do Firebase. 
             <a 
-              href="https://console.firebase.google.com/project/gen-lang-client-0617354751/authentication/providers" 
+              href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`}
               target="_blank" 
               rel="noopener noreferrer"
               className="block mt-2 underline font-bold text-rose-700"
@@ -227,8 +228,26 @@ export default function Login({ onLogin, onGoToRegister }: LoginProps) {
             </a>
           </span>
         );
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError(
+          <span>
+            Este domínio não está autorizado para login com Google. 
+            <a 
+              href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="block mt-2 underline font-bold text-rose-700"
+            >
+              Clique aqui para adicionar "{window.location.hostname}" aos domínios autorizados em Authentication &gt; Settings.
+            </a>
+          </span>
+        );
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('O popup de login foi bloqueado pelo seu navegador. Por favor, permita popups para este site e tente novamente.');
       } else if (err.code === 'auth/account-exists-with-different-credential') {
         setError('Já existe uma conta com este e-mail usando um método de login diferente (ex: E-mail/Senha). Por favor, use o método original.');
+      } else if (err.message?.includes('Missing or insufficient permissions')) {
+        setError('Erro de permissão ao acessar seu perfil. Por favor, tente novamente ou contate o administrador.');
       } else {
         setError('Erro ao entrar com Google. Tente novamente.');
       }
@@ -328,7 +347,7 @@ export default function Login({ onLogin, onGoToRegister }: LoginProps) {
           <span>
             O login com Apple ainda não foi habilitado no Console do Firebase. 
             <a 
-              href="https://console.firebase.google.com/project/gen-lang-client-0617354751/authentication/providers" 
+              href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`}
               target="_blank" 
               rel="noopener noreferrer"
               className="block mt-2 underline font-bold text-rose-700"
@@ -337,8 +356,26 @@ export default function Login({ onLogin, onGoToRegister }: LoginProps) {
             </a>
           </span>
         );
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError(
+          <span>
+            Este domínio não está autorizado para login com Apple. 
+            <a 
+              href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="block mt-2 underline font-bold text-rose-700"
+            >
+              Clique aqui para adicionar "{window.location.hostname}" aos domínios autorizados em Authentication &gt; Settings.
+            </a>
+          </span>
+        );
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('O popup de login foi bloqueado pelo seu navegador. Por favor, permita popups para este site e tente novamente.');
       } else if (err.code === 'auth/account-exists-with-different-credential') {
         setError('Já existe uma conta com este e-mail usando um método de login diferente (ex: Google ou E-mail/Senha). Por favor, use o método original.');
+      } else if (err.message?.includes('Missing or insufficient permissions')) {
+        setError('Erro de permissão ao acessar seu perfil. Por favor, tente novamente ou contate o administrador.');
       } else {
         setError('Erro ao entrar com Apple. Tente novamente.');
       }

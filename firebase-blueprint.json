@@ -60,6 +60,15 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "description", "category", "amount", "date"]
+    },
+    "GeneralSettings": {
+      "title": "GeneralSettings",
+      "description": "General application settings",
+      "type": "object",
+      "properties": {
+        "monthlyContribution": { "type": "number", "description": "Default monthly fee amount" },
+        "recurringDay": { "type": "number", "description": "Day of the month for recurring billing (1-28)" }
+      }
     }
   },
   "firestore": {
@@ -72,7 +81,7 @@
       "description": "Invoice documents"
     },
     "/settings/{settingId}": {
-      "schema": "BankAccount",
+      "schema": "GeneralSettings",
       "description": "Application settings documents (like bank account or general settings)"
     },
     "/expenses/{expenseId}": {

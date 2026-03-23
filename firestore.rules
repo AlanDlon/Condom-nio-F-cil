@@ -74,8 +74,7 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin() || (resource.data.email == request.auth.token.email));
-      allow list: if isAdmin();
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin() || (resource.data.email == request.auth.token.email));
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
         isAdmin() || 
         (request.auth.uid == userId && request.resource.data.id == userId && (

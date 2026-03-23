@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, FormEvent } from 'react';
 import { Wallet, CreditCard, Clock, Copy, QrCode, LogOut, ListFilter, CheckCircle, AlertTriangle, ShieldCheck, XCircle, FileText, Landmark, Settings, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, Tooltip as RechartsTooltip, ResponsiveContainer as RechartsResponsiveContainer } from 'recharts';
 import { Invoice, User, Expense } from '../types';
 import InvoiceHistory from './InvoiceHistory';
@@ -26,6 +27,7 @@ export default function ResidentDashboard({ onLogout, onSwitchToAdmin, user }: R
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [generatingPayment, setGeneratingPayment] = useState(false);
 
   // Bank Account Form State
   const [bankInfo, setBankInfo] = useState({
@@ -166,37 +168,71 @@ export default function ResidentDashboard({ onLogout, onSwitchToAdmin, user }: R
 
   const handlePayPix = async () => {
     if (!selectedInvoice) return;
+    
+    // If invoice already has a pixCode, use it
+    if (selectedInvoice.pixCode) {
+      setPixCode(selectedInvoice.pixCode);
+      setShowPaymentModal(false);
+      return;
+    }
+
+    setGeneratingPayment(true);
     try {
       const response = await fetch('/api/generate-pix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId: selectedInvoice.id, amount: selectedInvoice.amount })
+        body: JSON.stringify({ 
+          invoiceId: selectedInvoice.id, 
+          amount: Number(selectedInvoice.amount) 
+        })
       });
       const data = await response.json();
       if (data.pixCode) {
         setPixCode(data.pixCode);
         setShowPaymentModal(false);
+      } else {
+        alert('Erro ao gerar QR Code Pix. Tente novamente.');
       }
     } catch (error) {
       console.error('Erro Pix:', error);
+      alert('Erro de conexão ao gerar Pix.');
+    } finally {
+      setGeneratingPayment(false);
     }
   };
 
   const handlePayBoleto = async () => {
     if (!selectedInvoice) return;
+
+    // If invoice already has a boletoCode, use it
+    if (selectedInvoice.boletoCode) {
+      setBoletoCode(selectedInvoice.boletoCode);
+      setShowPaymentModal(false);
+      return;
+    }
+
+    setGeneratingPayment(true);
     try {
       const response = await fetch('/api/generate-boleto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId: selectedInvoice.id, amount: selectedInvoice.amount })
+        body: JSON.stringify({ 
+          invoiceId: selectedInvoice.id, 
+          amount: Number(selectedInvoice.amount) 
+        })
       });
       const data = await response.json();
       if (data.boletoCode) {
         setBoletoCode(data.boletoCode);
         setShowPaymentModal(false);
+      } else {
+        alert('Erro ao gerar Boleto. Tente novamente.');
       }
     } catch (error) {
       console.error('Erro Boleto:', error);
+      alert('Erro de conexão ao gerar Boleto.');
+    } finally {
+      setGeneratingPayment(false);
     }
   };
 
@@ -498,12 +534,32 @@ export default function ResidentDashboard({ onLogout, onSwitchToAdmin, user }: R
                 <p className="text-2xl font-bold text-premium-navy">R$ {selectedInvoice.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
               </div>
               <div className="grid grid-cols-1 gap-3">
-                <button onClick={handlePayPix} className="w-full bg-slate-50 hover:bg-slate-100 p-4 rounded-2xl flex items-center gap-4 transition-all border border-slate-100 text-left">
-                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center"><QrCode className="text-emerald-600" size={20} /></div>
+                <button 
+                  onClick={handlePayPix} 
+                  disabled={generatingPayment}
+                  className="w-full bg-slate-50 hover:bg-slate-100 p-4 rounded-2xl flex items-center gap-4 transition-all border border-slate-100 text-left disabled:opacity-50"
+                >
+                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                    {generatingPayment ? (
+                      <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <QrCode className="text-emerald-600" size={20} />
+                    )}
+                  </div>
                   <div><p className="font-bold text-slate-800">Pix</p><p className="text-xs text-slate-500">Instantâneo</p></div>
                 </button>
-                <button onClick={handlePayBoleto} className="w-full bg-slate-50 hover:bg-slate-100 p-4 rounded-2xl flex items-center gap-4 transition-all border border-slate-100 text-left">
-                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><FileText className="text-blue-600" size={20} /></div>
+                <button 
+                  onClick={handlePayBoleto} 
+                  disabled={generatingPayment}
+                  className="w-full bg-slate-50 hover:bg-slate-100 p-4 rounded-2xl flex items-center gap-4 transition-all border border-slate-100 text-left disabled:opacity-50"
+                >
+                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                    {generatingPayment ? (
+                      <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <FileText className="text-blue-600" size={20} />
+                    )}
+                  </div>
                   <div><p className="font-bold text-slate-800">Boleto Bancário</p><p className="text-xs text-slate-500">Compensação em até 3 dias</p></div>
                 </button>
                 <button onClick={handleAutomaticDebit} className="w-full bg-slate-50 hover:bg-slate-100 p-4 rounded-2xl flex items-center gap-4 transition-all border border-slate-100 text-left">
@@ -520,10 +576,22 @@ export default function ResidentDashboard({ onLogout, onSwitchToAdmin, user }: R
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-3xl p-8 w-full max-w-sm text-center space-y-6">
               <h3 className="text-xl font-bold text-premium-navy">Pagamento via Pix</h3>
-              <div className="bg-slate-100 p-4 rounded-2xl flex justify-center"><QrCode size={180} className="text-premium-navy" /></div>
-              <p className="text-slate-500 text-sm">Copie o código abaixo para pagar no seu banco.</p>
-              <button onClick={() => copyToClipboard(pixCode)} className="w-full bg-slate-900 text-white py-4 rounded-xl flex items-center justify-center gap-2 font-bold"><Copy size={18} /> Copiar Código Pix</button>
-              <button onClick={() => setPixCode(null)} className="w-full text-slate-400 font-medium py-2">Fechar</button>
+              <div className="bg-white p-6 rounded-2xl flex flex-col items-center justify-center border border-slate-100 shadow-inner">
+                <QRCodeCanvas 
+                  value={pixCode} 
+                  size={200} 
+                  level="H"
+                  includeMargin={true}
+                  className="rounded-lg"
+                />
+                <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                  QR Code Gerado com Sucesso
+                </div>
+              </div>
+              <p className="text-slate-500 text-sm">Escaneie o QR Code acima ou copie o código abaixo para pagar.</p>
+              <button onClick={() => copyToClipboard(pixCode)} className="w-full bg-slate-900 text-white py-4 rounded-xl flex items-center justify-center gap-2 font-bold hover:bg-slate-800 transition-all active:scale-95"><Copy size={18} /> Copiar Código Pix</button>
+              <button onClick={() => setPixCode(null)} className="w-full text-slate-400 font-medium py-2 hover:text-slate-600 transition-colors">Fechar</button>
             </motion.div>
           </div>
         )}

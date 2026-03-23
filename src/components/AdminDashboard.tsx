@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, FormEvent } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer as RechartsResponsiveContainer } from 'recharts';
-import { Users, AlertTriangle, TrendingUp, Download, LogOut, Search, Mail, Bell, CheckCircle, XCircle, Plus, X, DollarSign, Calendar, Building2, BarChart3, Settings, CreditCard, FileText, ChevronRight, ChevronDown, Home, ShieldCheck, Trash2 } from 'lucide-react';
+import { Users, AlertTriangle, TrendingUp, Download, LogOut, Search, Mail, Bell, CheckCircle, XCircle, Plus, X, DollarSign, Calendar, Building2, BarChart3, Settings, CreditCard, FileText, ChevronRight, ChevronDown, Home, ShieldCheck, Trash2, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, query, where, addDoc, serverTimestamp, doc, setDoc, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
@@ -63,6 +64,11 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
   const [loading, setLoading] = useState(true);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showInvoicesListModal, setShowInvoicesListModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [selectedResidentForEmail, setSelectedResidentForEmail] = useState<ResidentRecord | null>(null);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [selectedResidentId, setSelectedResidentId] = useState('');
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [invoiceDueDate, setInvoiceDueDate] = useState('');
@@ -116,6 +122,9 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
   const [bankSearch, setBankSearch] = useState('');
   const [showBankDropdown, setShowBankDropdown] = useState(false);
   const [monthlyContribution, setMonthlyContribution] = useState<number>(250);
+  const [recurringDay, setRecurringDay] = useState<number>(10);
+  const [recurringMode, setRecurringMode] = useState<'all' | 'manual'>('all');
+  const [recurringResidentIds, setRecurringResidentIds] = useState<string[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
 
   const filteredBanks = useMemo(() => {
@@ -144,7 +153,13 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
     getDoc(doc(db, 'settings', 'general')).then((docSnap) => {
       if (docSnap.exists()) {
         const val = docSnap.data().monthlyContribution || 250;
+        const day = docSnap.data().recurringDay || 10;
+        const mode = docSnap.data().recurringMode || 'all';
+        const ids = docSnap.data().recurringResidentIds || [];
         setMonthlyContribution(val);
+        setRecurringDay(day);
+        setRecurringMode(mode);
+        setRecurringResidentIds(ids);
         setInvoiceAmount(val.toString());
       }
     }).catch(err => handleFirestoreError(err, OperationType.GET, settingsPath));
@@ -242,10 +257,11 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
       const pixCode = '00020126330014BR.GOV.BCB.PIX011112345678901520400005303986540550.005802BR5915CondominioFacil6009SAO PAULO62070503***6304E1D1';
 
       if (selectedResidentId === 'all') {
-        // Create invoices for all residents
-        const promises = residents.map(resident => 
+        // Create invoices for all residents and admins
+        const allUsers = [...residents, ...admins];
+        const promises = allUsers.map(user => 
           addDoc(collection(db, 'invoices'), {
-            userId: resident.id,
+            userId: user.id,
             amount,
             dueDate,
             status: 'pending',
@@ -257,7 +273,7 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
           })
         );
         await Promise.all(promises);
-        alert(`${residents.length} faturas geradas com sucesso!`);
+        alert(`${allUsers.length} faturas geradas com sucesso!`);
       } else {
         // Create single invoice
         await addDoc(collection(db, 'invoices'), {
@@ -688,6 +704,39 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
     doc.save(fileName);
   };
 
+  const handleExportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    
+    // Invoices Data (Revenue)
+    const invoiceData = allInvoices.map(inv => {
+      const resident = residents.find(r => r.id === inv.userId);
+      return {
+        'Unidade': resident?.unit || 'N/A',
+        'Morador': resident?.name || 'N/A',
+        'Valor (R$)': inv.amount,
+        'Vencimento': new Date(inv.dueDate).toLocaleDateString('pt-BR'),
+        'Status': inv.status === 'paid' ? 'PAGO' : inv.status === 'pending' ? 'PENDENTE' : 'ATRASADO',
+        'Data de Pagamento': inv.paymentDate ? new Date(inv.paymentDate).toLocaleDateString('pt-BR') : '-',
+        'Valor Pago (R$)': inv.amountPaid || 0
+      };
+    });
+    const wsInvoices = XLSX.utils.json_to_sheet(invoiceData);
+    XLSX.utils.book_append_sheet(wb, wsInvoices, "Receitas");
+
+    // Expenses Data
+    const expenseData = expenses.map(exp => ({
+      'Descrição': exp.description,
+      'Categoria': exp.category,
+      'Valor (R$)': exp.amount,
+      'Data': new Date(exp.date).toLocaleDateString('pt-BR')
+    }));
+    const wsExpenses = XLSX.utils.json_to_sheet(expenseData);
+    XLSX.utils.book_append_sheet(wb, wsExpenses, "Despesas");
+
+    // Save File
+    XLSX.writeFile(wb, `movimentacoes-financeiras-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const filteredResidents = useMemo(() => {
     return residents.filter(r => {
       const matchesSearch = r.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -713,12 +762,42 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
   ];
 
   const handleNotify = async (resident: ResidentRecord) => {
+    setSelectedResidentForEmail(resident);
+    setEmailSubject('Comunicado do Condomínio Fácil');
+    setEmailMessage(`Olá ${resident.nickname},\n\nEste é um comunicado importante sobre o condomínio.`);
+    setShowEmailModal(true);
+  };
+
+  const handleSendEmail = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedResidentForEmail) return;
+
+    setSendingEmail(true);
     try {
-      // In a real app, you'd have an endpoint to send a push notification to a specific user
-      // For this demo, we'll simulate it via a generic notify endpoint or just alert if no tokens
-      alert(`Notificação de cobrança enviada para ${resident.email}`);
-    } catch (error) {
-      console.error('Erro ao enviar notificação:', error);
+      const response = await fetch('/api/send-notification-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: selectedResidentForEmail.id,
+          subject: emailSubject,
+          message: emailMessage
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('E-mail de notificação enviado com sucesso!');
+        setShowEmailModal(false);
+        setEmailSubject('');
+        setEmailMessage('');
+      } else {
+        throw new Error(data.error || 'Erro ao enviar e-mail');
+      }
+    } catch (error: any) {
+      console.error('Erro ao enviar e-mail:', error);
+      alert(`Erro: ${error.message}`);
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -1109,47 +1188,168 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
                     <DollarSign size={24} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-premium-navy">Contribuição Mensal</h3>
-                    <p className="text-slate-500 text-sm">Defina o valor base da taxa de condomínio para os moradores.</p>
+                    <h3 className="text-xl font-bold text-premium-navy">Faturamento Recorrente</h3>
+                    <p className="text-slate-500 text-sm">Configure a cobrança automática mensal para todos os moradores.</p>
                   </div>
                 </div>
               </div>
 
               <div className="p-8">
-                <div className="max-w-xs">
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Valor da Contribuição (R$)</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">R$</span>
-                    <input 
-                      type="number"
-                      value={monthlyContribution}
-                      onChange={(e) => setMonthlyContribution(Number(e.target.value))}
-                      className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-premium-gold outline-none font-bold text-lg"
-                      placeholder="0,00"
-                    />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Valor da Contribuição (R$)</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">R$</span>
+                      <input 
+                        type="number"
+                        value={monthlyContribution}
+                        onChange={(e) => setMonthlyContribution(Number(e.target.value))}
+                        className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-premium-gold outline-none font-bold text-lg"
+                        placeholder="0,00"
+                      />
+                    </div>
                   </div>
-                  <button
-                    onClick={async () => {
-                      setSavingSettings(true);
-                      try {
-                        await setDoc(doc(db, 'settings', 'general'), {
-                          monthlyContribution,
-                          updatedAt: serverTimestamp()
-                        });
-                        setInvoiceAmount(monthlyContribution.toString());
-                        alert('Valor da contribuição atualizado com sucesso!');
-                      } catch (err) {
-                        handleFirestoreError(err, OperationType.WRITE, 'settings/general');
-                      } finally {
-                        setSavingSettings(false);
-                      }
-                    }}
-                    disabled={savingSettings}
-                    className="mt-6 w-full bg-premium-navy text-white py-3 rounded-xl font-bold hover:bg-opacity-90 transition-all disabled:opacity-50"
-                  >
-                    {savingSettings ? 'Salvando...' : 'Salvar Valor'}
-                  </button>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Dia de Vencimento (1-28)</label>
+                    <div className="relative">
+                      <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="number"
+                        min="1"
+                        max="28"
+                        value={recurringDay}
+                        onChange={(e) => setRecurringDay(Number(e.target.value))}
+                        className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-premium-gold outline-none font-bold text-lg"
+                        placeholder="Ex: 10"
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                <div className="mt-8 space-y-4">
+                  <label className="block text-sm font-medium text-slate-700">Público-Alvo do Faturamento</label>
+                  <div className="flex flex-col md:flex-row gap-4">
+                    <button 
+                      onClick={() => setRecurringMode('all')}
+                      className={`flex-1 p-5 rounded-2xl border-2 transition-all text-left ${recurringMode === 'all' ? 'border-premium-gold bg-premium-gold/5 ring-1 ring-premium-gold/20' : 'border-slate-100 hover:border-slate-200'}`}
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className={`p-2 rounded-lg ${recurringMode === 'all' ? 'bg-premium-gold text-white' : 'bg-slate-100 text-slate-400'}`}>
+                          <Users size={18} />
+                        </div>
+                        <span className="font-bold text-premium-navy">Todos os Moradores</span>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">Inclui todos os residentes e administradores cadastrados no sistema.</p>
+                    </button>
+                    <button 
+                      onClick={() => setRecurringMode('manual')}
+                      className={`flex-1 p-5 rounded-2xl border-2 transition-all text-left ${recurringMode === 'manual' ? 'border-premium-gold bg-premium-gold/5 ring-1 ring-premium-gold/20' : 'border-slate-100 hover:border-slate-200'}`}
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className={`p-2 rounded-lg ${recurringMode === 'manual' ? 'bg-premium-gold text-white' : 'bg-slate-100 text-slate-400'}`}>
+                          <CheckCircle size={18} />
+                        </div>
+                        <span className="font-bold text-premium-navy">Seleção Manual</span>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">Escolha individualmente quem receberá a cobrança mensal.</p>
+                    </button>
+                  </div>
+                </div>
+
+                {recurringMode === 'manual' && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="mt-6 border border-slate-100 rounded-2xl overflow-hidden bg-slate-50/50"
+                  >
+                    <div className="p-4 bg-white border-b border-slate-100 flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-premium-navy">Selecionar Moradores</span>
+                        <span className="bg-premium-gold/10 text-premium-gold text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          {recurringResidentIds.length} selecionados
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const allUserIds = [...residents, ...admins].map(u => u.id);
+                          if (recurringResidentIds.length === allUserIds.length) {
+                            setRecurringResidentIds([]);
+                          } else {
+                            setRecurringResidentIds(allUserIds);
+                          }
+                        }}
+                        className="text-xs font-bold text-premium-gold hover:text-premium-navy transition-colors"
+                      >
+                        {recurringResidentIds.length === (residents.length + admins.length) ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                      </button>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2 no-scrollbar">
+                      {[...residents, ...admins].map(user => (
+                        <label 
+                          key={user.id} 
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${recurringResidentIds.includes(user.id) ? 'bg-white border-premium-gold/30 shadow-sm' : 'bg-transparent border-transparent hover:bg-white/50'}`}
+                        >
+                          <div className="relative flex items-center">
+                            <input 
+                              type="checkbox"
+                              checked={recurringResidentIds.includes(user.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setRecurringResidentIds([...recurringResidentIds, user.id]);
+                                } else {
+                                  setRecurringResidentIds(recurringResidentIds.filter(id => id !== user.id));
+                                }
+                              }}
+                              className="w-5 h-5 accent-premium-gold rounded border-slate-300"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">{user.name}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">
+                              {user.unit ? `Unidade ${user.unit}` : 'Administrador'}
+                            </p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className="mt-8 p-4 bg-premium-gold/5 border border-premium-gold/10 rounded-2xl flex gap-4">
+                  <AlertTriangle className="text-premium-gold flex-shrink-0" size={24} />
+                  <div className="text-sm text-slate-600">
+                    <p className="font-bold text-premium-navy mb-1">Como funciona o faturamento recorrente?</p>
+                    <p>
+                      Todo dia <strong>{recurringDay}</strong> de cada mês, o sistema gerará automaticamente uma fatura de <strong>R$ {monthlyContribution.toFixed(2)}</strong> para <strong>{recurringMode === 'all' ? 'todos os moradores e administradores' : `${recurringResidentIds.length} moradores selecionados`}</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    setSavingSettings(true);
+                    try {
+                      await setDoc(doc(db, 'settings', 'general'), {
+                        monthlyContribution,
+                        recurringDay,
+                        recurringMode,
+                        recurringResidentIds: recurringMode === 'manual' ? recurringResidentIds : [],
+                        updatedAt: serverTimestamp()
+                      });
+                      setInvoiceAmount(monthlyContribution.toString());
+                      alert('Configurações de faturamento atualizadas com sucesso!');
+                    } catch (err) {
+                      handleFirestoreError(err, OperationType.WRITE, 'settings/general');
+                    } finally {
+                      setSavingSettings(false);
+                    }
+                  }}
+                  disabled={savingSettings}
+                  className="mt-8 bg-premium-navy text-white px-8 py-4 rounded-xl font-bold hover:bg-opacity-90 transition-all disabled:opacity-50 shadow-lg"
+                >
+                  {savingSettings ? 'Salvando...' : 'Salvar Configurações de Faturamento'}
+                </button>
               </div>
             </motion.div>
 
@@ -1523,6 +1723,12 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
                 >
                   <Download size={18} /> Exportar PDF
                 </button>
+                <button 
+                  onClick={handleExportExcel}
+                  className="flex items-center gap-2 text-sm font-bold text-emerald-600 hover:text-premium-navy transition-colors"
+                >
+                  <FileSpreadsheet size={18} /> Exportar Excel
+                </button>
               </div>
 
               <div className="h-[350px] w-full">
@@ -1696,10 +1902,17 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
                       required
                     >
                       <option value="">Selecione um morador...</option>
-                      <option value="all" className="font-bold text-premium-gold">TODOS OS MORADORES ({residents.length})</option>
-                      {residents.map(r => (
-                        <option key={r.id} value={r.id}>{r.name} ({r.nickname}) - {r.unit}</option>
-                      ))}
+                      <option value="all" className="font-bold text-premium-gold">TODOS OS USUÁRIOS ({residents.length + admins.length})</option>
+                      <optgroup label="Moradores">
+                        {residents.map(r => (
+                          <option key={r.id} value={r.id}>{r.name} ({r.nickname}) - {r.unit}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Administradores">
+                        {admins.map(a => (
+                          <option key={a.id} value={a.id}>{a.name} (Admin)</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
                 </div>
@@ -1923,7 +2136,8 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
                 <div>
                   <h3 className="text-xl font-bold text-premium-navy">Débitos e Faturas</h3>
                   <p className="text-slate-500 text-sm">
-                    {residents.find(r => r.id === selectedResidentId)?.name} - Unidade {residents.find(r => r.id === selectedResidentId)?.unit}
+                    {residents.find(r => r.id === selectedResidentId)?.name || admins.find(a => a.id === selectedResidentId)?.name} 
+                    {residents.find(r => r.id === selectedResidentId)?.unit ? ` - Unidade ${residents.find(r => r.id === selectedResidentId)?.unit}` : ' (Administrador)'}
                   </p>
                 </div>
                 <button 
@@ -2171,6 +2385,77 @@ export default function AdminDashboard({ onLogout, onSwitchToResident, user }: A
                 >
                   {creatingResident ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showEmailModal && selectedResidentForEmail && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl border-t-4 border-premium-navy"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-premium-navy">Enviar Notificação por E-mail</h3>
+                  <p className="text-slate-500 text-sm">Para: {selectedResidentForEmail.name} ({selectedResidentForEmail.email})</p>
+                </div>
+                <button onClick={() => setShowEmailModal(false)} className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSendEmail} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Assunto</label>
+                  <input
+                    type="text"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-premium-gold outline-none"
+                    placeholder="Ex: Aviso sobre manutenção de elevadores"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mensagem</label>
+                  <textarea
+                    value={emailMessage}
+                    onChange={(e) => setEmailMessage(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-premium-gold outline-none min-h-[200px] resize-none"
+                    placeholder="Escreva sua mensagem aqui..."
+                    required
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setShowEmailModal(false)}
+                    className="flex-1 px-6 py-4 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={sendingEmail}
+                    className="flex-[2] bg-premium-navy text-white py-4 rounded-xl font-bold shadow-lg hover:bg-opacity-90 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {sendingEmail ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      <>
+                        <Mail size={20} />
+                        Enviar E-mail
+                      </>
+                    )}
+                  </button>
+                </div>
               </form>
             </motion.div>
           </div>
