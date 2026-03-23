@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nickname": { "type": "string", "description": "Preferred name or how the user likes to be called" },
+        "cpf": { "type": "string" },
+        "email": { "type": "string" },
+        "houseNumber": { "type": "string" },
+        "role": { "type": "string", "enum": ["resident", "admin"] }
+      },
+      "required": ["id", "name", "nickname", "cpf", "email", "houseNumber", "role"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Condo fee invoice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "paymentDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["paid", "pending", "overdue"] },
+        "pixCode": { "type": "string" }
+      },
+      "required": ["id", "userId", "amount", "dueDate", "status"]
+    },
+    "BankAccount": {
+      "title": "BankAccount",
+      "description": "Bank account for receiving payments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bankName": { "type": "string" },
+        "accountType": { "type": "string", "enum": ["corrente", "poupanca"] },
+        "agency": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "pixKey": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerCpfCnpj": { "type": "string" }
+      },
+      "required": ["id", "bankName", "accountType", "agency", "accountNumber", "pixKey", "ownerName", "ownerCpfCnpj"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Condominium expense or service performed",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string", "description": "Service name or description (e.g., Pool cleaning)" },
+        "category": { "type": "string", "enum": ["Manutenção", "Limpeza", "Segurança", "Energia", "Água", "Outros"] },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "description", "category", "amount", "date"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Invoice documents"
+    },
+    "/settings/{settingId}": {
+      "schema": "BankAccount",
+      "description": "Application settings documents (like bank account or general settings)"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Condominium expense documents"
+    }
+  }
+}

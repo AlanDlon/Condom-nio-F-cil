@@ -1,0 +1,109 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: userId (Firebase Auth UID)
+// Fields:
+//   - id: string (required)
+//   - name: string (required)
+//   - cpf: string (required)
+//   - email: string (required)
+//   - houseNumber: string (required)
+//   - role: string (required, 'resident' | 'admin')
+//
+// Collection: invoices
+// Document ID: auto-generated
+// Fields:
+//   - id: string (required)
+//   - userId: string (required)
+//   - amount: number (required)
+//   - amountPaid: number (optional)
+//   - dueDate: string (required, ISO 8601)
+//   - paymentDate: string (optional, ISO 8601)
+//   - status: string (required, 'paid' | 'pending' | 'overdue')
+//   - pixCode: string (optional)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "alandloon123@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'nickname', 'cpf', 'email', 'houseNumber', 'role']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.nickname is string && data.nickname.size() > 0 && data.nickname.size() < 50 &&
+             data.cpf is string && data.cpf.size() >= 3 && data.cpf.size() < 20 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.houseNumber is string && data.houseNumber.size() > 0 && data.houseNumber.size() < 20 &&
+             data.role in ['resident', 'admin'];
+    }
+
+    function isValidInvoice(data) {
+      return data.keys().hasAll(['id', 'userId', 'amount', 'dueDate', 'status']) &&
+             data.id is string &&
+             data.userId is string &&
+             data.amount is number && data.amount >= 0 &&
+             data.dueDate is string &&
+             data.status in ['paid', 'pending', 'overdue'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin() || (resource.data.email == request.auth.token.email));
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || 
+        (request.auth.uid == userId && request.resource.data.id == userId && (
+          request.resource.data.role == 'resident' || 
+          (request.resource.data.role == 'admin' && exists(/databases/$(database)/documents/users/$(request.auth.token.email)))
+        ))
+      );
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || 
+        (request.auth.uid == userId && request.resource.data.id == userId && request.resource.data.role == resource.data.role)
+      );
+      allow delete: if isAdmin() || (isAuthenticated() && userId == request.auth.token.email);
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAdmin() && isValidInvoice(request.resource.data);
+      allow update: if (isAdmin() || (isOwner(resource.data.userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'amountPaid', 'paymentDate']))) && isValidInvoice(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
